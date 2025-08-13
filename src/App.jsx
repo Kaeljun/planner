@@ -15,28 +15,38 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
-const STORAGE_KEY = "studyPlanner:v3";
+/* =================== Persistência / Tema =================== */
+const STORAGE_KEY = "studyPlanner:v6";
 const THEME_KEY = "studyPlanner:theme";
-
-function uid() {
-  return Math.random().toString(36).slice(2, 7);
-}
+const uid = () => Math.random().toString(36).slice(2, 7);
 
 function useTheme() {
-  const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem(THEME_KEY);
-    if (saved) return saved;
-    return window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-  });
+  const [theme, setTheme] = useState(
+    () =>
+      localStorage.getItem(THEME_KEY) ??
+      (window.matchMedia?.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light")
+  );
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
-  const toggle = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
-  return { theme, toggle };
+  return {
+    theme,
+    toggle: () => setTheme((t) => (t === "dark" ? "light" : "dark")),
+  };
+}
+
+function normalize(nodes) {
+  const walk = (n) => {
+    const children = n.children?.map(walk) ?? [];
+    const studied = children.length
+      ? children.every((c) => c.studied)
+      : !!n.studied;
+    return { ...n, studied, children };
+  };
+  return nodes.map(walk);
 }
 
 function useItems() {
@@ -44,66 +54,58 @@ function useItems() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed)
-        ? parsed.map((it) => ({
-            ...it,
-            children: Array.isArray(it.children) ? it.children : [],
-          }))
-        : [];
+      const ensure = (n) => ({
+        id: n.id || uid(),
+        name: (n.name || "").trim(),
+        studied: !!n.studied,
+        children: Array.isArray(n.children) ? n.children.map(ensure) : [],
+      });
+      return normalize(Array.isArray(parsed) ? parsed.map(ensure) : []);
     } catch {
       return [];
     }
   });
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  }, [items]);
+  useEffect(
+    () => localStorage.setItem(STORAGE_KEY, JSON.stringify(items)),
+    [items]
+  );
   return [items, setItems];
 }
 
-function calcSubStat(it) {
-  const total = it.children.length;
-  const done = it.children.filter((s) => s.studied).length;
-  return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
-}
-
-function detectDelimiter(text) {
-  const first = text.split(/\r?\n/).find((l) => l.trim().length > 0) || "";
-  const c = (first.match(/,/g) || []).length;
-  const s = (first.match(/;/g) || []).length;
-  return s > c ? ";" : ",";
-}
-
+/* =================== CSV helpers =================== */
+const detectDelimiter = (t) => {
+  const first = t.split(/\r?\n/).find((l) => l.trim()) || "";
+  const vc = (first.match(/,/g) || []).length,
+    sc = (first.match(/;/g) || []).length;
+  return sc > vc ? ";" : ",";
+};
 function parseCSV(text) {
   if (!text) return [];
   const delim = detectDelimiter(text);
   const rows = [];
-  let cur = "";
-  let inside = false;
-  let row = [];
+  let cur = "",
+    inside = false,
+    row = [];
   const push = () => {
     row.push(cur);
     cur = "";
   };
   for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const next = text[i + 1];
+    const ch = text[i],
+      nx = text[i + 1];
     if (ch == '"') {
-      if (inside && next == '"') {
+      if (inside && nx == '"') {
         cur += '"';
         i++;
       } else inside = !inside;
     } else if (ch === delim && !inside) {
       push();
     } else if ((ch == "\n" || ch == "\r") && !inside) {
-      if (ch == "\r" && next == "\n") {
-        i++;
-      }
+      if (ch == "\r" && nx == "\n") i++;
       push();
       rows.push(row);
       row = [];
-    } else {
-      cur += ch;
-    }
+    } else cur += ch;
   }
   if (cur.length > 0 || row.length > 0) {
     push();
@@ -113,12 +115,11 @@ function parseCSV(text) {
     .map((r) => r.map((c) => c.trim()))
     .filter((r) => r.some((c) => c !== ""));
 }
-
-function mapCSVToItems(rows) {
+function mapCSV(rows) {
   if (rows.length === 0) return [];
   const header = rows[0].map((h) => h.toLowerCase());
-  let data = rows;
-  let idxName = -1,
+  let data = rows,
+    idxName = -1,
     idxStatus = -1,
     idxSub = -1;
   const headerLike = [
@@ -146,20 +147,19 @@ function mapCSVToItems(rows) {
     idxStatus = rows[0].length > 1 ? 1 : -1;
     idxSub = -1;
   }
-
   const out = [];
   for (const r of data) {
     let name = r[idxName] || "";
     if (!name.trim()) continue;
-    let sub = idxSub > -1 ? r[idxSub] || "" : "";
-    if (!sub) {
+    let subPath = idxSub > -1 ? r[idxSub] || "" : "";
+    if (!subPath) {
       const parts = name
         .split(">")
         .map((s) => s.trim())
         .filter(Boolean);
       if (parts.length > 1) {
         name = parts[0];
-        sub = parts.slice(1).join(" > ");
+        subPath = parts.slice(1).join(" > ");
       }
     }
     let studied = false;
@@ -170,248 +170,217 @@ function mapCSVToItems(rows) {
           s
         ) || s.startsWith("estud");
     }
-    out.push({ name: name.trim(), sub: sub.trim(), studied });
+    out.push({ name: name.trim(), subPath: subPath.trim(), studied });
   }
   return out;
 }
-
 function toCSV(items) {
   const esc = (v) => '"' + String(v).replaceAll('"', '""') + '"';
   const lines = ["disciplina,subdisciplina,status"];
-  for (const it of items) {
-    if (it.children.length === 0) {
-      lines.push(esc(it.name) + ",," + (it.studied ? "estudada" : "pendente"));
-    } else {
-      for (const ch of it.children) {
+  const dfs = (parentPath, node) => {
+    if (!node.children.length) {
+      if (parentPath)
         lines.push(
-          esc(it.name) +
+          esc(parentPath) +
             "," +
-            esc(ch.name) +
+            esc(node.name) +
             "," +
-            (ch.studied ? "estudada" : "pendente")
+            (node.studied ? "estudada" : "pendente")
         );
-      }
+      else
+        lines.push(
+          esc(node.name) + ",," + (node.studied ? "estudada" : "pendente")
+        );
+      return;
     }
-  }
+    for (const ch of node.children) {
+      const p = parentPath ? `${parentPath} > ${node.name}` : node.name;
+      dfs(p, ch);
+    }
+  };
+  for (const it of items) dfs("", it);
   return lines.join("\n");
 }
 
+/* =================== helpers =================== */
+const calcSubStat = (n) => ({
+  done: n.children.filter((s) => s.studied).length,
+  total: n.children.length,
+});
+const addChild = (nodes, parentId, name) =>
+  nodes.map((n) =>
+    n.id === parentId
+      ? {
+          ...n,
+          children: [
+            ...n.children,
+            { id: uid(), name: name.trim(), studied: false, children: [] },
+          ],
+        }
+      : { ...n, children: addChild(n.children, parentId, name) }
+  );
+const removeNode = (nodes, id) =>
+  nodes
+    .filter((n) => n.id !== id)
+    .map((n) => ({ ...n, children: removeNode(n.children, id) }));
+const setStudiedCascade = (nodes, id, val) => {
+  const mark = (m) => ({
+    ...m,
+    studied: !!val,
+    children: m.children.map(mark),
+  });
+  const step = (arr) =>
+    arr.map((n) =>
+      n.id === id ? mark(n) : { ...n, children: step(n.children) }
+    );
+  return normalize(step(nodes));
+};
+const renameNode = (nodes, id, newName) =>
+  nodes.map((n) =>
+    n.id === id
+      ? { ...n, name: newName.trim() }
+      : { ...n, children: renameNode(n.children, id, newName) }
+  );
+
+/* =================== App =================== */
 export default function App() {
   const { theme, toggle } = useTheme();
   const [items, setItems] = useItems();
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
-  const [expanded, setExpanded] = useState(() => new Set());
 
-  const bulkDlg = useRef(null);
-  const bulkText = useRef(null);
-  const importDlg = useRef(null);
-  const csvText = useRef(null);
-  const subDlg = useRef(null);
-  const subText = useRef(null);
-  const subFor = useRef({ id: "", name: "" });
+  // "Apenas uma aberta por nível": Map<parentKey, childId>
+  const [openByParent, setOpenByParent] = useState(() => new Map());
+  const isOpen = (parentKey, id) => openByParent.get(parentKey) === id;
+  const idToNode = useMemo(() => {
+    const map = new Map();
+    const walk = (n) => {
+      map.set(n.id, n);
+      n.children.forEach(walk);
+    };
+    items.forEach(walk);
+    return map;
+  }, [items]);
+  const collectSubtreeIds = (rootId) => {
+    const root = idToNode.get(rootId);
+    const out = [];
+    if (!root) return out;
+    (function dfs(n) {
+      out.push(n.id);
+      n.children.forEach(dfs);
+    })(root);
+    return out;
+  };
+  const toggleOpen = (parentKey, id) => {
+    setOpenByParent((prev) => {
+      const next = new Map(prev);
+      const cur = next.get(parentKey);
+      const clearSubtree = (rid) => {
+        for (const sid of collectSubtreeIds(rid)) next.delete(sid);
+      };
+      if (cur === id) {
+        next.delete(parentKey);
+        clearSubtree(id);
+      } else {
+        if (cur) clearSubtree(cur);
+        next.set(parentKey, id);
+      }
+      return next;
+    });
+  };
 
-  const ensureItem = (it) => ({
-    id: it.id || uid(),
-    name: (it.name || "").trim(),
-    studied: !!it.studied,
-    createdAt: it.createdAt || new Date().toISOString(),
-    children: Array.isArray(it.children) ? it.children : [],
-  });
+  // Dialogs / inputs
+  const bulkDlg = useRef(null),
+    bulkText = useRef(null);
+  const importDlg = useRef(null),
+    csvText = useRef(null);
+  const subDlg = useRef(null),
+    subText = useRef(null),
+    subFor = useRef({ id: "", name: "" });
 
-  const addOne = (name, studied = false) => {
-    name = (name || "").trim();
-    if (!name) return false;
-    if (items.some((i) => i.name.toLowerCase() === name.toLowerCase()))
+  const addOne = (name) => {
+    const nm = (name || "").trim();
+    if (!nm) return false;
+    if (items.some((i) => i.name.toLowerCase() === nm.toLowerCase()))
       return false;
-    setItems((prev) => [...prev, ensureItem({ name, studied })]);
+    setItems((prev) => [
+      ...prev,
+      { id: uid(), name: nm, studied: false, children: [] },
+    ]);
     return true;
   };
-
-  const addSub = (parentId, name, studied = false) => {
-    setItems((prev) =>
-      prev.map((p) => {
-        if (p.id !== parentId) return p;
-        if (
-          p.children.some(
-            (c) => c.name.toLowerCase() === name.trim().toLowerCase()
-          )
-        )
-          return p;
-        const children = [
-          ...p.children,
-          { id: uid(), name: name.trim(), studied: !!studied },
-        ];
-        const studiedParent = children.length
-          ? children.every((x) => x.studied)
-          : p.studied;
-        return { ...p, children, studied: studiedParent };
-      })
-    );
+  const onCheck = (id, checked) =>
+    setItems((prev) => setStudiedCascade(prev, id, checked));
+  const onRename = (id, current) => {
+    const nn = prompt("Novo nome", current) || "";
+    if (nn.trim()) setItems((p) => renameNode(p, id, nn));
   };
+  const onRemove = (id) => setItems((prev) => removeNode(prev, id));
+  const addSub = (parentId, name) =>
+    setItems((prev) => normalize(addChild(prev, parentId, name)));
 
-  const removeOne = (id) => setItems((prev) => prev.filter((i) => i.id !== id));
-
-  const removeSub = (parentId, subId) =>
-    setItems((prev) =>
-      prev.map((p) => {
-        if (p.id !== parentId) return p;
-        const children = p.children.filter((c) => c.id !== subId);
-        const studiedParent = children.length
-          ? children.every((x) => x.studied)
-          : p.studied;
-        return { ...p, children, studied: studiedParent };
-      })
-    );
-
-  const setStudied = (id, val) =>
-    setItems((prev) =>
-      prev.map((it) => {
-        if (it.id !== id) return it;
-        const children = it.children.map((c) => ({ ...c, studied: !!val }));
-        return { ...it, studied: !!val, children };
-      })
-    );
-
-  const setSubStudied = (parentId, subId, val) =>
-    setItems((prev) =>
-      prev.map((p) => {
-        if (p.id !== parentId) return p;
-        const children = p.children.map((c) =>
-          c.id === subId ? { ...c, studied: !!val } : c
-        );
-        const studiedParent = children.length
-          ? children.every((x) => x.studied)
-          : p.studied;
-        return { ...p, children, studied: studiedParent };
-      })
-    );
-
-  const renameOne = (id, newName) =>
-    setItems((prev) =>
-      prev.map((it) =>
-        it.id === id ? { ...it, name: (newName || "").trim() } : it
-      )
-    );
-  const renameSub = (parentId, subId, newName) =>
-    setItems((prev) =>
-      prev.map((p) =>
-        p.id === parentId
-          ? {
-              ...p,
-              children: p.children.map((c) =>
-                c.id === subId ? { ...c, name: (newName || "").trim() } : c
-              ),
-            }
-          : p
-      )
-    );
-
-  const markAll = (val) =>
-    setItems((prev) =>
-      prev.map((i) => ({
-        ...i,
-        studied: !!val,
-        children: i.children.map((c) => ({ ...c, studied: !!val })),
-      }))
-    );
-  const clearAll = () => {
-    if (confirm("Tem certeza que deseja apagar todas as disciplinas?"))
-      setItems([]);
-  };
-
-  const toggleExpand = (id) =>
-    setExpanded((prev) => {
-      const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
-
-  const filtered = React.useMemo(() => {
-    const qq = q.trim().toLowerCase();
-    const flt = items
-      .filter((it) => {
-        const okFilter =
-          filter === "all" || (filter === "done" ? it.studied : !it.studied);
-        const matchSelf = !qq || it.name.toLowerCase().includes(qq);
-        const matchChild =
-          !qq || it.children.some((c) => c.name.toLowerCase().includes(qq));
-        return okFilter && (matchSelf || matchChild);
-      })
-      .sort((a, b) => {
-        if (a.studied !== b.studied) return a.studied - b.studied;
-        return a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
-      });
-    return flt;
-  }, [items, filter, q]);
-
-  const counters = React.useMemo(() => {
-    const total = items.length;
-    const done = items.filter((i) => i.studied).length;
-    const pct = total ? Math.round((done / total) * 100) : 0;
-    return { total, done, pct };
-  }, [items]);
-
+  // Import/Export
   const [preview, setPreview] = useState("");
   const onCSVPreview = (text) => {
-    const rows = parseCSV(text);
-    const mapped = mapCSVToItems(rows);
-    const incoming = mapped.length;
-    if (incoming === 0) {
+    const rows = parseCSV(text),
+      recs = mapCSV(rows);
+    if (recs.length === 0) {
       setPreview("");
       return;
     }
-    const existingNames = new Set(items.map((i) => i.name.toLowerCase()));
+    const existing = new Set(items.map((i) => i.name.toLowerCase()));
     const parents = new Set();
-    let subs = 0;
-    for (const it of mapped) {
-      parents.add(it.name.toLowerCase());
-      if (it.sub) subs++;
+    let lines = 0;
+    for (const r of recs) {
+      parents.add(r.name.toLowerCase());
+      lines++;
     }
-    const newParents = [...parents].filter((p) => !existingNames.has(p)).length;
+    const newParents = [...parents].filter((p) => !existing.has(p)).length;
     setPreview(
-      `${incoming} linhas detectadas • ${newParents} disciplina(s) nova(s) • ${subs} subdisciplina(s).`
+      `${lines} linhas detectadas • ${newParents} disciplina(s) nova(s).`
     );
   };
-
   const doImport = (text) => {
-    const rows = parseCSV(text);
-    const mapped = mapCSVToItems(rows);
-    if (mapped.length === 0) return;
+    const rows = parseCSV(text),
+      recs = mapCSV(rows);
+    if (recs.length === 0) return;
     setItems((prev) => {
-      const byName = new Map(prev.map((i) => [i.name.toLowerCase(), i]));
-      const out = [...prev];
-      for (const rec of mapped) {
-        const key = rec.name.toLowerCase();
-        let parent = byName.get(key);
-        if (!parent) {
-          parent = ensureItem({
-            name: rec.name,
-            studied: rec.sub ? false : rec.studied,
-          });
-          out.push(parent);
-          byName.set(key, parent);
+      const map = new Map(prev.map((i) => [i.name.toLowerCase(), i]));
+      const out = structuredClone(prev);
+      const ensureChild = (parent, name) => {
+        let child = parent.children.find(
+          (c) => c.name.toLowerCase() === name.toLowerCase()
+        );
+        if (!child) {
+          child = { id: uid(), name, studied: false, children: [] };
+          parent.children.push(child);
         }
-        if (rec.sub) {
-          const exists = parent.children.find(
-            (c) => c.name.toLowerCase() === rec.sub.toLowerCase()
-          );
-          if (!exists) {
-            parent.children.push({
-              id: uid(),
-              name: rec.sub,
-              studied: !!rec.studied,
-            });
-          }
-          parent.studied = parent.children.every((x) => x.studied);
-        } else if (rec.studied) {
+        return child;
+      };
+      for (const r of recs) {
+        let parent = map.get(r.name.toLowerCase());
+        if (!parent) {
+          parent = { id: uid(), name: r.name, studied: false, children: [] };
+          out.push(parent);
+          map.set(r.name.toLowerCase(), parent);
+        }
+        if (r.subPath) {
+          const parts = r.subPath
+            .split(">")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          let cur = parent;
+          parts.forEach((seg, i) => {
+            cur = ensureChild(cur, seg);
+            if (i === parts.length - 1 && r.studied) cur.studied = true;
+          });
+        } else if (r.studied) {
           parent.studied = true;
         }
       }
-      return out.map(ensureItem);
+      return normalize(out);
     });
   };
-
   const doExport = () => {
     if (items.length === 0) {
       alert("Nada para exportar.");
@@ -427,6 +396,31 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  // Filtro/busca
+  const matches = (n, qq) =>
+    n.name.toLowerCase().includes(qq) || n.children.some((c) => matches(c, qq));
+  const filtered = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    return items
+      .filter(
+        (it) =>
+          (filter === "all" ||
+            (filter === "done" ? it.studied : !it.studied)) &&
+          (!qq || matches(it, qq))
+      )
+      .sort((a, b) =>
+        a.studied !== b.studied
+          ? a.studied - b.studied
+          : a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" })
+      );
+  }, [items, filter, q]);
+
+  const counters = useMemo(() => {
+    const total = items.length,
+      done = items.filter((i) => i.studied).length;
+    return { total, done, pct: total ? Math.round((done / total) * 100) : 0 };
+  }, [items]);
+
   const openBulk = () => {
     bulkText.current.value = "";
     bulkDlg.current.showModal();
@@ -437,50 +431,40 @@ export default function App() {
       .map((s) => s.trim())
       .filter(Boolean);
     let added = 0;
-    for (const line of lines) {
-      if (addOne(line, false)) added++;
+    for (const l of lines) {
+      if (addOne(l)) added++;
     }
     bulkDlg.current.close();
     if (added === 0) alert("Nada foi adicionado (duplicatas?)");
   };
-
-  const openSubDlg = (it) => {
-    subFor.current = it;
+  const openSubDlg = (node) => {
+    subFor.current = node;
     subText.current.value = "";
     subDlg.current.showModal();
   };
   const confirmSub = () => {
     const p = subFor.current;
     if (!p?.id) return;
-    const lines = (subText.current.value || "")
+    (subText.current.value || "")
       .split(/\r?\n/)
       .map((s) => s.trim())
-      .filter(Boolean);
-    let added = 0;
-    for (const line of lines) {
-      addSub(p.id, line, false);
-      added++;
-    }
+      .filter(Boolean)
+      .forEach((l) => setItems((prev) => normalize(addChild(prev, p.id, l))));
     subDlg.current.close();
-    if (added === 0) alert("Nenhuma subdisciplina adicionada.");
   };
-
   const openImport = () => {
-    csvText.current.value = preview ? csvText.current.value : "";
+    csvText.current.value = "";
     setPreview("");
     importDlg.current.showModal();
   };
   const confirmImport = () => {
-    const txt = csvText.current.value || "";
-    doImport(txt);
+    doImport(csvText.current.value || "");
     setPreview("");
     importDlg.current.close();
   };
-
   const onDropCSV = (ev) => {
     ev.preventDefault();
-    const f =
-      ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+    const f = ev.dataTransfer?.files?.[0];
     if (f && /\.csv$/i.test(f.name)) {
       const r = new FileReader();
       r.onload = () => {
@@ -506,8 +490,7 @@ export default function App() {
                 Planejador de Disciplinas
               </h1>
               <p className="text-xs text-[var(--muted)]">
-                Adicione matérias, subdisciplinas, marque como estudadas e
-                importe/exporte via CSV. Tudo salvo no navegador.
+                3 níveis, CSV e progresso salvo localmente.
               </p>
             </div>
             <button
@@ -522,30 +505,54 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-[1200px] px-4 pb-10">
+        {/* Toolbar */}
         <section className="mt-4 space-y-3">
-          <div className="grid md:grid-cols-[1fr_auto] gap-3">
-            <div className="flex gap-2">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3 shadow toolbar">
+            <div className="flex flex-wrap items-center gap-2">
               <AddOne onAdd={addOne} />
-            </div>
-            <div className="flex flex-wrap gap-2 justify-end">
-              <button className="btn" onClick={openBulk}>
-                <Plus size={16} /> Em massa
-              </button>
-              <button className="btn" onClick={openImport}>
-                <Upload size={16} /> Importar CSV
-              </button>
-              <button className="btn" onClick={doExport}>
-                <Download size={16} /> Exportar
-              </button>
-              <button className="btn ok" onClick={() => markAll(true)}>
-                <CheckSquare size={16} /> Marcar todas
-              </button>
-              <button className="btn warn" onClick={() => markAll(false)}>
-                <Square size={16} /> Desmarcar
-              </button>
-              <button className="btn danger" onClick={clearAll}>
-                <Trash2 size={16} /> Limpar
-              </button>
+              <div className="flex flex-wrap gap-2 ml-auto">
+                <button className="btn" onClick={openBulk}>
+                  <Plus size={16} /> Em massa
+                </button>
+                <button className="btn" onClick={openImport}>
+                  <Upload size={16} /> Importar CSV
+                </button>
+                <button className="btn" onClick={doExport}>
+                  <Download size={16} /> Exportar
+                </button>
+                <button
+                  className="btn ok"
+                  onClick={() =>
+                    setItems((prev) =>
+                      normalize(
+                        prev.map((i) => setStudiedCascade([i], i.id, true)[0])
+                      )
+                    )
+                  }
+                >
+                  <CheckSquare size={16} /> Marcar todas
+                </button>
+                <button
+                  className="btn warn"
+                  onClick={() =>
+                    setItems((prev) =>
+                      normalize(
+                        prev.map((i) => setStudiedCascade([i], i.id, false)[0])
+                      )
+                    )
+                  }
+                >
+                  <Square size={16} /> Desmarcar
+                </button>
+                <button
+                  className="btn danger"
+                  onClick={() => {
+                    if (confirm("Apagar todas?")) setItems([]);
+                  }}
+                >
+                  <Trash2 size={16} /> Limpar
+                </button>
+              </div>
             </div>
           </div>
 
@@ -556,7 +563,7 @@ export default function App() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Pesquisar…"
-                className="ml-2 flex-1 rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 outline-none"
+                className="ml-2 flex-1 rounded-xl border border-[var(--border)] bg-transparent px-3 py-1.5 text-sm h-9 outline-none"
               />
               <span className="text-xs text-[var(--muted)] hidden md:block">
                 Dica: arraste um CSV para importar.
@@ -576,6 +583,7 @@ export default function App() {
           </div>
         </section>
 
+        {/* Lista */}
         <section className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--panel)] shadow">
           {filtered.length === 0 ? (
             <div className="p-6 text-center text-[var(--muted)]">
@@ -584,216 +592,27 @@ export default function App() {
           ) : (
             <ul className="divide-y divide-[var(--border)]">
               <AnimatePresence initial={false}>
-                {filtered.map((it) => (
-                  <motion.li
-                    key={it.id}
-                    layout
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.18 }}
-                    className="relative"
-                  >
-                    <div
-                      className={`grid grid-cols-[auto_auto_1fr_auto] items-center gap-3 p-3 ${
-                        it.studied ? "opacity-80" : ""
-                      }`}
-                    >
-                      <button
-                        aria-label="Expandir"
-                        onClick={() => toggleExpand(it.id)}
-                        className="h-6 w-6 rounded-md border border-[var(--border)] flex items-center justify-center"
-                      >
-                        {expanded.has(it.id) ? (
-                          <ChevronDown size={16} />
-                        ) : (
-                          <ChevronRight size={16} />
-                        )}
-                      </button>
-                      <input
-                        type="checkbox"
-                        checked={!!it.studied}
-                        onChange={(e) => setStudied(it.id, e.target.checked)}
-                        className="h-4 w-4"
-                      />
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="chip">#{it.id}</span>
-                        <span
-                          className={`truncate ${
-                            it.studied ? "line-through" : ""
-                          }`}
-                        >
-                          {it.name}
-                        </span>
-                        <span className="chip">
-                          {calcSubStat(it).done}/{calcSubStat(it).total}
-                        </span>
-                      </div>
-                      <div className="flex gap-1">
-                        <button
-                          className="btn ghost"
-                          onClick={() => openSubDlg(it)}
-                          title="Adicionar subdisciplinas"
-                        >
-                          <ListPlus size={16} />
-                        </button>
-                        <button
-                          className="btn ghost"
-                          onClick={() => {
-                            const nn = prompt("Novo nome", it.name) || "";
-                            if (nn.trim()) renameOne(it.id, nn);
-                          }}
-                          title="Renomear"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          className="btn ghost"
-                          onClick={() => removeOne(it.id)}
-                          title="Excluir"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <motion.div
-                      layout
-                      initial={false}
-                      animate={{
-                        height: expanded.has(it.id) ? "auto" : 0,
-                        opacity: expanded.has(it.id) ? 1 : 0,
-                      }}
-                      transition={{ duration: 0.25 }}
-                      style={{ overflow: "hidden" }}
-                    >
-                      <ul className="space-y-1 border-t border-dashed border-[var(--border)] bg-[var(--sub-bg)] px-3 py-2">
-                        <AnimatePresence initial={false}>
-                          {(!q
-                            ? it.children
-                            : it.children.filter((c) =>
-                                c.name.toLowerCase().includes(q.toLowerCase())
-                              )
-                          )
-                            .sort((a, b) => {
-                              if (a.studied !== b.studied)
-                                return a.studied - b.studied;
-                              return a.name.localeCompare(b.name, "pt-BR", {
-                                sensitivity: "base",
-                              });
-                            })
-                            .map((ch) => (
-                              <motion.li
-                                key={ch.id}
-                                layout
-                                initial={{ opacity: 0, x: -4 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -4 }}
-                                transition={{ duration: 0.18 }}
-                                className={`grid grid-cols-[auto_1fr_auto] items-center gap-3 px-1 py-1 ${
-                                  ch.studied ? "opacity-80" : ""
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={!!ch.studied}
-                                  onChange={(e) =>
-                                    setSubStudied(
-                                      it.id,
-                                      ch.id,
-                                      e.target.checked
-                                    )
-                                  }
-                                  className="h-4 w-4"
-                                />
-                                <span
-                                  className={`truncate ${
-                                    ch.studied ? "line-through" : ""
-                                  }`}
-                                >
-                                  {ch.name}
-                                </span>
-                                <div className="flex gap-1">
-                                  <button
-                                    className="btn ghost"
-                                    onClick={() => {
-                                      const nn =
-                                        prompt(
-                                          "Novo nome da subdisciplina",
-                                          ch.name
-                                        ) || "";
-                                      if (nn.trim())
-                                        renameSub(it.id, ch.id, nn);
-                                    }}
-                                    title="Renomear"
-                                  >
-                                    <Pencil size={16} />
-                                  </button>
-                                  <button
-                                    className="btn ghost"
-                                    onClick={() => removeSub(it.id, ch.id)}
-                                    title="Excluir"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
-                              </motion.li>
-                            ))}
-                        </AnimatePresence>
-                      </ul>
-                    </motion.div>
-                  </motion.li>
+                {filtered.map((node) => (
+                  <NodeRow
+                    key={node.id}
+                    node={node}
+                    depth={1}
+                    parentKey="root"
+                    isOpen={isOpen}
+                    toggleOpen={toggleOpen}
+                    onCheck={onCheck}
+                    onRename={onRename}
+                    onAddSub={openSubDlg}
+                    onRemove={onRemove}
+                  />
                 ))}
               </AnimatePresence>
             </ul>
           )}
         </section>
-
-        <details className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3">
-          <summary className="cursor-pointer text-sm text-[var(--muted)]">
-            Como importar CSV?
-          </summary>
-          <div className="mt-2 text-sm space-y-2">
-            <p>Formatos aceitos:</p>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>
-                Sem cabeçalho: <code>Matemática</code> (uma por linha) ou{" "}
-                <code>Matemática,Estudada</code>
-              </li>
-              <li>
-                Com cabeçalho (qualquer ordem): <code>disciplina,status</code> —
-                status: <em>estudada/pendente</em> (ou{" "}
-                <em>true/false, sim/não, done/todo</em>).
-              </li>
-              <li>
-                Com subdisciplinas:
-                <ul className="list-disc pl-5">
-                  <li>
-                    Colunas: <code>disciplina,subdisciplina,status</code>
-                  </li>
-                  <li>
-                    Ou caminho único em <code>disciplina</code>:{" "}
-                    <code>
-                      Direito Administrativo &gt; Processo Administrativo
-                    </code>
-                  </li>
-                </ul>
-              </li>
-            </ul>
-            <p>
-              Separador vírgula ou ponto e vírgula. Campos podem estar entre
-              aspas.
-            </p>
-            <pre className="rounded-lg bg-black/20 p-3 text-xs overflow-auto">
-              {`disciplina,subdisciplina,status
-Direito Administrativo,Organização administrativa,pendente
-Direito Administrativo,Processo administrativo,estudada
-Administração Pública,,pendente`}
-            </pre>
-          </div>
-        </details>
       </main>
 
+      {/* Dialogs */}
       <dialog ref={bulkDlg} className="dialog">
         <div className="dlg-head">
           <strong>Adicionar em massa</strong>
@@ -802,15 +621,13 @@ Administração Pública,,pendente`}
           </button>
         </div>
         <div className="dlg-body">
-          <p>
-            Insira uma disciplina por linha. Linhas em branco serão ignoradas.
-          </p>
+          <p>Uma disciplina por linha.</p>
           <textarea
             ref={bulkText}
-            placeholder={
-              "Ex.:\\nDireito Constitucional\\nDireito Administrativo\\nPortuguês"
-            }
             className="textarea"
+            placeholder={
+              "Ex.:\nDireito Constitucional\nDireito Administrativo\nPortuguês"
+            }
           ></textarea>
         </div>
         <div className="dlg-foot">
@@ -885,22 +702,36 @@ Administração Pública,,pendente`}
         </div>
         <div className="dlg-body">
           <p>
-            Insira uma subdisciplina por linha para{" "}
+            Uma subdisciplina por linha para{" "}
             <strong>{subFor.current?.name}</strong>.
           </p>
           <textarea
             ref={subText}
-            placeholder={
-              "Ex.:\\nProcesso administrativo\\nAtos administrativos\\nLicitações"
-            }
             className="textarea"
+            placeholder={
+              "Ex.:\nProcesso administrativo\nAtos administrativos\nLicitações"
+            }
           ></textarea>
         </div>
         <div className="dlg-foot">
           <button className="btn" onClick={() => subDlg.current.close()}>
             Cancelar
           </button>
-          <button className="btn primary" onClick={confirmSub}>
+          <button
+            className="btn primary"
+            onClick={() => {
+              const p = subFor.current;
+              if (!p?.id) return;
+              (subText.current.value || "")
+                .split(/\r?\n/)
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .forEach((l) =>
+                  setItems((prev) => normalize(addChild(prev, p.id, l)))
+                );
+              subDlg.current.close();
+            }}
+          >
             Adicionar
           </button>
         </div>
@@ -909,15 +740,157 @@ Administração Pública,,pendente`}
   );
 }
 
+/* =================== Nó recursivo =================== */
+function NodeRow({
+  node,
+  depth,
+  parentKey,
+  isOpen,
+  toggleOpen,
+  onCheck,
+  onRename,
+  onAddSub,
+  onRemove,
+}) {
+  const open = isOpen(parentKey, node.id);
+  const nextParentKey = node.id;
+  const hasChildren = node.children.length > 0;
+
+  // classes de nível para fundo/tinta
+  const levelClass = depth >= 4 ? "level-4" : depth === 3 ? "level-3" : "";
+
+  return (
+    <motion.li
+      layout
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -4 }}
+      transition={{ duration: 0.18 }}
+      className="relative"
+    >
+      <div
+        className={`row grid grid-cols-[auto_auto_1fr_auto] items-center gap-3 p-3 ${
+          node.studied ? "opacity-80" : ""
+        } ${levelClass}`}
+      >
+        {/* Expander: só se tiver filhos */}
+        {hasChildren ? (
+          <button
+            aria-label="Expandir"
+            onClick={() => toggleOpen(parentKey, node.id)}
+            className="expander h-6 w-6 rounded-md border border-[var(--border)] flex items-center justify-center"
+          >
+            {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          </button>
+        ) : (
+          <span className="h-6 w-6 inline-block" aria-hidden="true" />
+        )}
+
+        <input
+          type="checkbox"
+          checked={!!node.studied}
+          onChange={(e) => onCheck(node.id, e.target.checked)}
+          className="h-4 w-4"
+        />
+
+        {/* Coluna do título com gutter à esquerda (apenas para depth>1) */}
+        <div
+          className={`content-wrap depth-${depth} flex items-center gap-2 min-w-0 ${
+            depth > 1 ? "text-sm" : ""
+          }`}
+        >
+          {depth > 1 && (
+            <div className={`gutter depth-${depth}`} aria-hidden="true" />
+          )}
+          {depth === 1 && <span className="chip">#{node.id}</span>}
+          <span className={`truncate ${node.studied ? "line-through" : ""}`}>
+            {node.name}
+          </span>
+          <span className="chip">
+            {calcSubStat(node).done}/{calcSubStat(node).total}
+          </span>
+        </div>
+
+        <div className="flex gap-1">
+          {depth < 4 && (
+            <button
+              className="btn ghost"
+              title="Adicionar subdisciplina"
+              onClick={() => onAddSub(node)}
+            >
+              <ListPlus size={16} />
+            </button>
+          )}
+          <button
+            className="btn ghost"
+            title="Renomear"
+            onClick={() => onRename(node.id, node.name)}
+          >
+            <Pencil size={16} />
+          </button>
+          <button
+            className="btn ghost danger-ghost"
+            title="Excluir"
+            onClick={() => onRemove(node.id)}
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </div>
+
+      <motion.div
+        layout
+        initial={false}
+        animate={{
+          height: open && hasChildren ? "auto" : 0,
+          opacity: open && hasChildren ? 1 : 0,
+        }}
+        transition={{ duration: 0.25 }}
+        style={{ overflow: "hidden" }}
+      >
+        {hasChildren && (
+          <ul
+            className={`border-t border-b border-dashed border-[var(--border)] ${
+              depth === 1 ? "bg-[var(--sub-bg)]" : ""
+            }`}
+          >
+            {node.children
+              .sort((a, b) =>
+                a.studied !== b.studied
+                  ? a.studied - b.studied
+                  : a.name.localeCompare(b.name, "pt-BR", {
+                      sensitivity: "base",
+                    })
+              )
+              .map((child) => (
+                <NodeRow
+                  key={child.id}
+                  node={child}
+                  depth={depth + 1}
+                  parentKey={nextParentKey}
+                  isOpen={isOpen}
+                  toggleOpen={toggleOpen}
+                  onCheck={onCheck}
+                  onRename={onRename}
+                  onAddSub={onAddSub}
+                  onRemove={onRemove}
+                />
+              ))}
+          </ul>
+        )}
+      </motion.div>
+    </motion.li>
+  );
+}
+
+/* =================== Controles =================== */
 function AddOne({ onAdd }) {
   const [val, setVal] = useState("");
   const submit = () => {
-    if (onAdd(val, false)) {
-      setVal("");
-    }
+    if (onAdd(val)) setVal("");
   };
   return (
-    <div className="flex w-full gap-2">
+    <div className="flex w-full gap-2 min-w-0">
       <input
         value={val}
         onChange={(e) => setVal(e.target.value)}
@@ -928,7 +901,7 @@ function AddOne({ onAdd }) {
           }
         }}
         placeholder="Adicionar disciplina (Enter)"
-        className="flex-1 rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 outline-none"
+        className="flex-1 min-w-0 rounded-xl border border-[var(--border)] bg-transparent px-3 py-1.5 text-sm h-9 outline-none"
       />
       <button className="btn primary" onClick={submit}>
         <Plus size={16} /> Adicionar
@@ -936,7 +909,6 @@ function AddOne({ onAdd }) {
     </div>
   );
 }
-
 function Seg({ value, onChange }) {
   const Btn = ({ v, children }) => (
     <button
