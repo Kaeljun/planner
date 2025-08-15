@@ -1,7 +1,217 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-html[data-theme='dark']{--bg:#0b0d10;--panel:#12151a;--muted:#8892a6;--text:#e6edf3;--primary:#3b82f6;--danger:#ef4444;--ok:#10b981;--warn:#f59e0b;--border:#1f2937;--chip:#1b2330;--sub-bg:#0f131a;}
-html[data-theme='light']{--bg:#f7f7fb;--panel:#ffffff;--muted:#5b667a;--text:#0b1220;--primary:#2563eb;--danger:#b91c1c;--ok:#059669;--warn:#b45309;--border:#e5e7eb;--chip:#eef2ff;--sub-bg:#f4f6ff;}
-body{background:var(--bg);color:var(--text);} 
-@layer components{.btn{@apply inline-flex items-center gap-2 rounded-xl border px-3 py-2 transition; border-color:var(--border); background:transparent;} .btn:hover{transform:translateY(-1px);} .btn.primary{background:var(--primary);color:white;border-color:transparent;} .btn.ghost{background:transparent;} .btn.danger{background:var(--danger);color:white;border-color:transparent;} .btn.ok{background:var(--ok);color:white;border-color:transparent;} .btn.warn{background:var(--warn);color:black;border-color:transparent;} .chip{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;background:var(--chip);color:var(--text);padding:2px 6px;border-radius:8px;border:1px solid var(--border);} .dialog{border:1px solid var(--border);border-radius:16px;background:var(--panel);color:var(--text);padding:0;width:min(720px,96vw);} .dialog::backdrop{background:rgba(0,0,0,.45);} .dlg-head{@apply flex items-center justify-between; border-bottom:1px solid var(--border); padding:12px 16px;} .dlg-body{padding:12px 16px;} .dlg-foot{@apply flex gap-2 justify-end; border-top:1px solid var(--border); padding:12px 16px;} .textarea{@apply w-full min-h-[160px] rounded-xl px-3 py-2 outline-none; border:1px solid var(--border); background:transparent;} .drop{@apply block rounded-xl text-center cursor-pointer; border:2px dashed var(--border); padding:18px; color:var(--muted);} }
+
+/* Tema */
+html[data-theme="dark"] {
+  --bg: #0b0d10;
+  --panel: #12151a;
+  --muted: #8892a6;
+  --text: #e6edf3;
+  --primary: #3b82f6;
+  --danger: #ef4444;
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --border: #1f2937;
+  --chip: #1b2330;
+  --sub-bg: #0f131a;
+  --lvl-3: #1c2740;
+  --lvl-4: #283059;
+  --ghost-hover: rgba(255, 255, 2555, 0.06);
+}
+html[data-theme="light"] {
+  --bg: #f7f7fb;
+  --panel: #ffffff;
+  --muted: #5b667a;
+  --text: #0b1220;
+  --primary: #2563eb;
+  --danger: #b91c1c;
+  --ok: #059669;
+  --warn: #b45309;
+  --border: #e5e7eb;
+  --chip: #eef2ff;
+  --sub-bg: #f4f6ff;
+  --lvl-3: #e6efff;
+  --lvl-4: #dae3ff;
+  --ghost-hover: rgba(0, 0, 0, 0.06);
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+@layer components {
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: color-mix(in srgb, var(--panel) 60%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+      0 4px 6px -4px rgba(0, 0, 0, 0.1); /* shadow-lg */
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-xl border px-3 py-2 transition;
+    border-color: var(--border);
+    background: transparent;
+  }
+  .btn:hover {
+    transform: translateY(-1px);
+  }
+
+  .btn.primary {
+    background: var(--primary);
+    color: #fff;
+    border-color: transparent;
+  }
+  .btn.primary:hover {
+    filter: brightness(0.9);
+  }
+
+  .btn.ok {
+    background: var(--ok);
+    color: #fff;
+    border-color: transparent;
+  }
+  .btn.ok:hover {
+    filter: brightness(0.9);
+  }
+
+  .btn.warn {
+    background: var(--warn);
+    color: #111;
+    border-color: transparent;
+  }
+  .btn.warn:hover {
+    filter: brightness(0.95);
+  }
+
+  .btn.danger {
+    background: var(--danger);
+    color: #fff;
+    border-color: transparent;
+  }
+  .btn.danger:hover {
+    filter: brightness(0.9);
+  }
+
+  .btn.ghost {
+    background: transparent;
+  }
+  .btn.ghost:hover {
+    background: var(--ghost-hover);
+  }
+  .btn.danger-ghost {
+    background: transparent;
+  }
+  .btn.danger-ghost:hover {
+    background: color-mix(in srgb, var(--danger) 18%, transparent);
+    color: #fff;
+  }
+
+  .chip {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    background: var(--chip);
+    color: var(--text);
+    padding: 2px 6px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  .dialog {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--panel);
+    color: var(--text);
+    padding: 0;
+    width: min(720px, 96vw);
+  }
+  .dialog::backdrop {
+    background: rgba(0, 0, 0, 0.45);
+  }
+  .dlg-head {
+    @apply flex items-center justify-between;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+  }
+  .dlg-body {
+    padding: 12px 16px;
+  }
+  .dlg-foot {
+    @apply flex gap-2 justify-end;
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+  }
+
+  .textarea {
+    @apply w-full min-h-[160px] rounded-xl px-3 py-2 outline-none;
+    border: 1px solid var(--border);
+    background: transparent;
+  }
+
+  .drop {
+    @apply block rounded-xl text-center cursor-pointer;
+    border: 2px dashed var(--border);
+    padding: 18px;
+    color: var(--muted);
+  }
+
+  /* ----------------- Gutter por nível (guia azul) ----------------- */
+  .row {
+    position: relative;
+    z-index: 0;
+  }
+  .row .expander {
+    position: relative;
+    z-index: 2;
+  }
+
+  .content-wrap {
+    position: relative;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .gutter {
+    flex: 0 0 auto;
+    height: 1.75rem;
+    border-right: 2px solid color-mix(in srgb, var(--primary) 65%, transparent);
+    border-radius: 2px;
+  }
+
+  /* Tintas/cores por nível e largura da gutter */
+  .level-3 {
+    background: color-mix(in srgb, var(--lvl-3) 50%, transparent);
+  }
+  .level-4 {
+    background: color-mix(in srgb, var(--lvl-4) 50%, transparent);
+  }
+
+  .depth-2 .gutter {
+    width: 20px;
+    background: color-mix(in srgb, var(--lvl-3) 45%, transparent);
+  }
+  .depth-3 .gutter {
+    width: 44px;
+    background: color-mix(in srgb, var(--lvl-4) 45%, transparent);
+  }
+
+  .depth-4 .gutter {
+    width: 84px;
+    background: color-mix(in srgb, var(--lvl-4) 45%, transparent);
+  }
+
+  /* Toolbar detalhes */
+  .toolbar .btn {
+    @apply text-sm;
+  }
+}
