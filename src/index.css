@@ -17,6 +17,7 @@ html[data-theme="dark"] {
   --sub-bg: #0f131a;
   --lvl-3: #1c2740;
   --lvl-4: #283059;
+  --ghost-hover: rgba(255, 255, 2555, 0.06);
 }
 html[data-theme="light"] {
   --bg: #f7f7fb;
@@ -32,6 +33,7 @@ html[data-theme="light"] {
   --sub-bg: #f4f6ff;
   --lvl-3: #e6efff;
   --lvl-4: #dae3ff;
+  --ghost-hover: rgba(0, 0, 0, 0.06);
 }
 body {
   background: var(--bg);
@@ -45,6 +47,16 @@ ul {
 }
 
 @layer components {
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: color-mix(in srgb, var(--panel) 60%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+      0 4px 6px -4px rgba(0, 0, 0, 0.1); /* shadow-lg */
+  }
   .btn {
     @apply inline-flex items-center gap-2 rounded-xl border px-3 py-2 transition;
     border-color: var(--border);
@@ -94,7 +106,7 @@ ul {
     background: transparent;
   }
   .btn.ghost:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--ghost-hover);
   }
   .btn.danger-ghost {
     background: transparent;
@@ -194,7 +206,7 @@ ul {
   }
 
   .depth-4 .gutter {
-    width: 64px;
+    width: 84px;
     background: color-mix(in srgb, var(--lvl-4) 45%, transparent);
   }
 

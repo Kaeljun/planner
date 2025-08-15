@@ -482,7 +482,7 @@ export default function App() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDropCSV}
     >
-      <header className="sticky top-0 z-10 bg-[var(--panel)]/95 backdrop-blur border-b border-[var(--border)] shadow-lg">
+      <header className="header">
         <div className="mx-auto max-w-[1200px] px-4 py-4">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -490,13 +490,10 @@ export default function App() {
                 Planejador de Disciplinas
               </h1>
               <p className="text-xs text-[var(--muted)]">
-                3 níveis, CSV e progresso salvo localmente.
+                N níveis, CSV e progresso salvo localmente.
               </p>
             </div>
-            <button
-              onClick={toggle}
-              className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 hover:-translate-y-0.5 transition"
-            >
+            <button onClick={toggle} className="btn ghost">
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
               <span className="text-sm">Tema</span>
             </button>
@@ -610,6 +607,49 @@ export default function App() {
             </ul>
           )}
         </section>
+        <details className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3">
+          <summary className="cursor-pointer text-sm text-[var(--muted)]">
+            Como importar CSV?
+          </summary>
+          <div className="mt-2 text-sm space-y-2">
+            <p>Formatos aceitos:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>
+                Sem cabeçalho: <code>Matemática</code> (uma por linha) ou{" "}
+                <code>Matemática,Estudada</code>
+              </li>
+              <li>
+                Com cabeçalho (qualquer ordem): <code>disciplina,status</code> —
+                status: <em>estudada/pendente</em> (ou{" "}
+                <em>true/false, sim/não, done/todo</em>).
+              </li>
+              <li>
+                Com subdisciplinas:
+                <ul className="list-disc pl-5">
+                  <li>
+                    Colunas: <code>disciplina,subdisciplina,status</code>
+                  </li>
+                  <li>
+                    Ou caminho único em <code>disciplina</code>:{" "}
+                    <code>
+                      Direito Administrativo &gt; Processo Administrativo
+                    </code>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+            <p>
+              Separador vírgula ou ponto e vírgula. Campos podem estar entre
+              aspas.
+            </p>
+            <pre className="rounded-lg bg-black/20 p-3 text-xs overflow-auto">
+              {`disciplina,subdisciplina,status
+Direito Administrativo,Organização administrativa,pendente
+Direito Administrativo,Processo administrativo,estudada
+Administração Pública,,pendente`}
+            </pre>
+          </div>
+        </details>
       </main>
 
       {/* Dialogs */}
